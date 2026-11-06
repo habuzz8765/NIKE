@@ -160,8 +160,8 @@ def main():
     print("NIKE (New Insights for K-pop Explorers) 오케스트레이터 가동\n")
     config = load_config()
     
-    # 오직 디지털 차트만 수집하도록 강제 필터링
-    digital_jobs = [job for job in config.get("jobs", []) if job.get("enabled") and job.get("hype_group") == "digital"]
+    # 🌟 필터링 조건 완화: 'enabled'가 True이고, 서비스 이름이 'hanteo'가 아닌 모든 것을 디지털 차트로 간주합니다.
+    digital_jobs = [job for job in config.get("jobs", []) if job.get("enabled", True) and job.get("service", "") != "hanteo"]
     
     if digital_jobs:
         digital_df = scrape_digital_charts(digital_jobs)
@@ -172,6 +172,8 @@ def main():
             print("결과가 digital_test_result.csv 로 안전하게 저장되었습니다.")
         else:
             print("\n❌ 디지털 데이터가 수집되지 않았습니다.")
+    else:
+        print("\n⚠️ 실행할 디지털 차트 작업이 sync_config.json 에 없습니다.")
 
 if __name__ == "__main__":
     main()
