@@ -1,1 +1,72 @@
-
+{
+"version": "1.0",
+"description": "NIKE (New Insights for K-pop Explorers) - Core Synchronization Configuration",
+"jobs": [
+{
+"job_name": "Melon-Daily-Top-100",
+"enabled": true,
+"service": "melon",
+"tab_type": "digital",
+"frequency": "daily",
+"source_url": "https://www.melon.com/chart/day/index.htm",
+"entity_limit": 100,
+"include_in_hype": true,
+"hype_group": "melon",
+"hype_weight": 0.3
+},
+{
+"job_name": "Apple-Music-KR-Top-100",
+"enabled": true,
+"service": "apple",
+"tab_type": "digital",
+"frequency": "daily",
+"source_url": "https://music.apple.com/kr/playlist/top-100-south-korea/pl.d3d10c32fbc540b38e266367dc8cb00c",
+"entity_limit": 100,
+"include_in_hype": true,
+"hype_group": "apple",
+"hype_weight": 0.3
+},
+{
+"job_name": "Spotify-Top-50-Korea",
+"enabled": true,
+"service": "spotify",
+"tab_type": "digital",
+"frequency": "daily",
+"source_url": "https://open.spotify.com/playlist/37i9dQZEVXbNxXF4SkHj9F",
+"entity_limit": 50,
+"include_in_hype": true,
+"hype_group": "spotify",
+"hype_weight": 0.2
+},
+{
+"job_name": "YTMusic-Weekly-Hot-100",
+"enabled": true,
+"service": "ytmusic",
+"tab_type": "digital",
+"frequency": "weekly",
+"schedule": "Friday",
+"source_url": "https://charts.youtube.com/charts/TopSongs/kr/weekly",
+"entity_limit": 100,
+"include_in_hype": true,
+"hype_group": "ytmusic",
+"hype_weight": 0.2
+},
+{
+"job_name": "Hanteo-Daily-Physical-Album",
+"enabled": true,
+"service": "hanteo",
+"tab_type": "physical",
+"frequency": "daily",
+"source_url": "https://www.hanteochart.com/ranking/?type=album&term=day",
+"entity_limit": 100,
+"include_in_hype": false,
+"hype_group": "physical",
+"hype_weight": 0.0
+}
+],
+"hype_wave_settings": {
+"calculation_method": "power_exponential_blend",
+"digital_total_weight": 1.0,
+"export_days": 31
+}
+}
