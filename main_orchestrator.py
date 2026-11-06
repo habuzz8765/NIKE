@@ -1,7 +1,7 @@
 import os
 import json
 import time
-import re
+import requests
 import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -10,8 +10,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.action_chains import ActionChains
 
 # ---------------------------------------------------------
 # 설정 파일 로드
@@ -21,11 +20,11 @@ def load_config():
         return json.load(f)
 
 # ---------------------------------------------------------
-# 한터차트 (Physical) 크롤러 (하드코어 텍스트 역추적 방식)
+# 한터차트 (Physical) 크롤러 (Buzz님 검증 코드 이식)
 # ---------------------------------------------------------
 def scrape_hanteo_daily(limit=100):
     print("\n" + "="*50)
-    print(f"[Hanteo] 피지컬 일간 차트 텍스트 역추적 수집 시작...")
+    print(f"[Hanteo] 피지컬 일간 차트 수집 시작...")
     print("="*50)
     
     driver = None
@@ -37,100 +36,176 @@ def scrape_hanteo_daily(limit=100):
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        # 불필요한 미디어 로딩 전면 차단
-        prefs = {
-            "profile.managed_default_content_settings.images": 2,
-            "profile.default_content_setting_values.notifications": 2,
-            "profile.managed_default_content_settings.stylesheets": 2,
-            "profile.managed_default_content_settings.cookies": 2,
-            "profile.managed_default_content_settings.javascript": 1,
-            "profile.managed_default_content_settings.plugins": 2,
-            "profile.managed_default_content_settings.popups": 2,
-            "profile.managed_default_content_settings.geolocation": 2,
-            "profile.managed_default_content_settings.media_stream": 2,
-        }
-        chrome_options.add_experimental_option("prefs", prefs)
-        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
         
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-        driver.set_window_size(1920, 1080)
         
-        url = "https://www.hanteochart.com/ko/charts/album/daily"
-        driver.get(url)
+        print("🚀 한터차트 접속 중...")
+        driver.get("https://www.hanteochart.com/ko/charts/album/daily")
+        time.sleep(12) 
         
-        # DOM이 그려질 때까지 넉넉하게 무조건 10초 대기
-        time.sleep(10)
+        # 1. '일간' 탭 명시적 클릭 (투명도 0%인 가짜 탭 무시)
+        print("🔄 '일간' 탭 활성화 확인...")
+        js_find_daily_tab = """
+        var tabs = document.querySelectorAll('*');
+        for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].textContent && tabs[i].textContent.trim() === '일간') {
+                var rect = tabs[i].getBoundingClientRect();
+                var isVisible = true;
+                var curr = tabs[i];
+                while(curr && curr !== document.body) {
+                    var compStyle = window.getComputedStyle(curr);
+                    if(compStyle.display === 'none' || compStyle.visibility === 'hidden' || parseFloat(compStyle.opacity) === 0) {
+                        isVisible = false;
+                        break;
+                    }
+                    curr = curr.parentElement;
+                }
+                if (isVisible && rect.width > 0) return tabs[i];
+            }
+        }
+        return null;
+        """
+        try:
+            daily_tab = driver.execute_script(js_find_daily_tab)
+            if daily_tab:
+                ActionChains(driver).move_to_element(daily_tab).click().perform()
+                time.sleep(4)
+        except Exception:
+            pass
+            
+        # 2. '더보기' 버튼 찾기 JS 로직 
+        js_find_visible_more = """
+        var buttons = document.querySelectorAll('button, a, div, span');
+        var valid = [];
+        for (var i = 0; i < buttons.length; i++) {
+            var btn = buttons[i];
+            var text = (btn.textContent || '').replace(/\s+/g, '');
+            if (text.includes('더보기')) {
+                var rect = btn.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) continue;
+                
+                var isVisible = true;
+                var curr = btn;
+                while(curr && curr !== document.body) {
+                    var compStyle = window.getComputedStyle(curr);
+                    if(compStyle.display === 'none' || compStyle.visibility === 'hidden' || parseFloat(compStyle.opacity) === 0) {
+                        isVisible = false;
+                        break;
+                    }
+                    curr = curr.parentElement;
+                }
+                
+                if (isVisible) {
+                    valid.push({ el: btn, y: rect.top + window.scrollY });
+                }
+            }
+        }
         
-        # 100위까지 모든 데이터가 렌더링되도록 끝까지 스크롤 다운
-        for _ in range(5):
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        if (valid.length === 0) return null;
+        
+        valid.sort((a, b) => a.y - b.y);
+        var target = valid[0].el;
+        
+        var getInnermost = function(node) {
+            for (var j = 0; j < node.children.length; j++) {
+                var child = node.children[j];
+                var cText = (child.textContent || '').replace(/\s+/g, '');
+                if (cText.includes('더보기')) {
+                    return getInnermost(child);
+                }
+            }
+            return node;
+        };
+        return getInnermost(target);
+        """
+        
+        for i in range(1, 6):
+            print(f"🔄 {i}번째 데이터 확장 시도 중...")
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.4);")
+            time.sleep(1)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.8);")
             time.sleep(2)
             
-        print("  [Hanteo] 스크롤 및 렌더링 완료. 화면 텍스트 딥러닝 분석 시작...")
-        
-        # 🌟 핵심: HTML 구조나 클래스를 무시하고, 화면에 보이는 전체 텍스트 덩어리를 가져옵니다.
-        body_element = driver.find_element(By.TAG_NAME, "body")
-        page_text = body_element.text
-        lines = [line.strip() for line in page_text.split('\n') if line.strip()]
-        
-        rank_counter = 1
-        i = 0
-        
-        while i < len(lines) and rank_counter <= limit:
-            line = lines[i]
-            
-            # 1, 2, 3... 순서대로 정확히 순위 숫자만 있는 라인을 찾음
-            if line == str(rank_counter):
+            target_el = driver.execute_script(js_find_visible_more)
+            if target_el:
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_el)
+                time.sleep(2)
                 try:
-                    # 해당 순위 번호 아래쪽으로 나타나는 10줄의 텍스트를 분석 
-                    info_lines = []
-                    for j in range(1, 15):
-                        if i+j >= len(lines): break
-                        txt = lines[i+j]
-                        # '-', 'NEW', 'UP', 'DOWN' 등 차트 등락 관련 기호 및 단순 숫자(순위 상승/하락 폭) 제거
-                        if txt not in ['NEW', '-', 'UP', 'DOWN'] and not txt.replace(',', '').isdigit() and txt != '앨범 정보':
-                            info_lines.append(txt)
-                        # 앨범명, 아티스트, 지수(판매량) 등 충분한 데이터(4~5줄)가 모이면 중단
-                        if len(info_lines) >= 4:
-                            break
-                            
-                    # info_lines 중 가장 처음 나오는 문자가 보통 앨범명, 그다음이 아티스트명
-                    album_name = info_lines[0] if len(info_lines) > 0 else "정보 없음"
-                    artist_name = info_lines[1] if len(info_lines) > 1 else "정보 없음"
-                    
-                    # 지수(판매량)는 콤마(,)가 포함된 숫자를 우선적으로 찾음
-                    sales = "0"
-                    for txt in lines[i:i+15]: # 원본 라인에서 다시 검색
-                        if ',' in txt and any(c.isdigit() for c in txt) and txt != album_name and txt != artist_name:
-                            sales = txt
-                            break
-                    
-                    # 회사 소개나 상단 메뉴가 잘못 잡히는 것 방지
-                    if album_name not in ["홈", "차트", "월드", "회사 소개"] and album_name != "정보 없음":
-                        hanteo_data.append({
-                            'tab_type': 'physical',
-                            'platform': 'hanteo',
-                            'rank': rank_counter,
-                            'album': album_name,
-                            'artist': artist_name,
-                            'sales_index': sales,
-                            'scrape_time': scrape_time
-                        })
-                        print(f"  [{rank_counter}/{limit}] {album_name[:15]}... - {artist_name} (지수: {sales})")
-                        rank_counter += 1 # 1위를 찾으면 2위를 찾으러 감
-                        i += 3 # 데이터 찾았으므로 인덱스 점프
-                        continue
-                        
-                except Exception as e:
-                    pass
-            i += 1
-
-        if not hanteo_data:
-             print("  [Hanteo] ⚠️ 텍스트 분석 실패. 사이트 로딩 지연 또는 차단 의심.")
-             
+                    ActionChains(driver).move_to_element(target_el).click().perform()
+                    print(f"✅ {i}번째 진짜 '일간 차트 더보기' 물리적 클릭 성공!")
+                except Exception:
+                    driver.execute_script("arguments[0].click();", target_el)
+                    print(f"✅ {i}번째 진짜 '일간 차트 더보기' JS 보조 클릭 성공!")
+                time.sleep(6) 
+            else:
+                print(f"⚠️ {i}번째: 화면에 활성화된 '더보기'가 없습니다.")
+                break
+                
+        print("🔍 최종 데이터 수집 시작 (활성 탭 전용)...")
+        # 3. 데이터 추출 JS 로직
+        js_extract_data = """
+        var rows = document.querySelectorAll('div.chart-item.rank-data');
+        var result = [];
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            
+            var isVisible = true;
+            var curr = row;
+            while(curr && curr !== document.body) {
+                var compStyle = window.getComputedStyle(curr);
+                if(compStyle.display === 'none' || compStyle.visibility === 'hidden' || parseFloat(compStyle.opacity) === 0) {
+                    isVisible = false;
+                    break;
+                }
+                curr = curr.parentElement;
+            }
+            
+            if (!isVisible) continue;
+            
+            var leftEl = row.querySelector('div.left');
+            var centerEl = row.querySelector('div.center');
+            var rightEl = row.querySelector('div.right');
+            
+            if (!leftEl || !centerEl || !rightEl) continue;
+            
+            var rankTexts = leftEl.innerText.trim().split('\\n');
+            var rank = rankTexts[0];
+            if (isNaN(parseInt(rank))) continue;
+            
+            var centerTexts = centerEl.innerText.trim().split('\\n');
+            var artist = centerTexts.length >= 1 ? centerTexts[centerTexts.length - 1] : '';
+            var album = centerTexts.length >= 2 ? centerTexts[centerTexts.length - 2] : '';
+            
+            var rightTexts = rightEl.innerText.trim().split('\\n');
+            var index_score = rightTexts.length >= 1 ? rightTexts[rightTexts.length - 1] : '0';
+            var sales = rightTexts.length >= 2 ? rightTexts[rightTexts.length - 2] : '0';
+            
+            result.push([rank, album, artist, sales, index_score]);
+            if (result.length >= 100) break;
+        }
+        return result;
+        """
+        
+        extracted_rows = driver.execute_script(js_extract_data)
+        
+        if extracted_rows:
+            for r in extracted_rows:
+                hanteo_data.append({
+                    'tab_type': 'physical',
+                    'platform': 'hanteo',
+                    'rank': r[0],
+                    'album': r[1],
+                    'artist': r[2],
+                    # Buzz님의 코드는 r[3]에 판매량, r[4]에 지수가 저장됨
+                    # Hype 계산용으로는 지수(index_score)를 사용합니다.
+                    'sales_index': r[4], 
+                    'scrape_time': scrape_time
+                })
+            
     except Exception as e:
-        print(f"[Hanteo] 셀레니움 드라이버 에러 발생: {e}")
+        print(f"[Hanteo] 에러 발생: {e}")
     finally:
         if driver: driver.quit()
         
