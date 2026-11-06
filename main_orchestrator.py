@@ -198,8 +198,7 @@ def scrape_hanteo_daily(limit=100):
                     'rank': r[0],
                     'album': r[1],
                     'artist': r[2],
-                    # Buzz님의 코드는 r[3]에 판매량, r[4]에 지수가 저장됨
-                    # Hype 계산용으로는 지수(index_score)를 사용합니다.
+                    'sales': r[3],         # 🌟 판매량 열 추가
                     'sales_index': r[4], 
                     'scrape_time': scrape_time
                 })
