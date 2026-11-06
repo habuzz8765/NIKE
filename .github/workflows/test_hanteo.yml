@@ -1,0 +1,31 @@
+name: Hanteo Crawler Test
+
+on:
+  workflow_dispatch: # 수동 실행 버튼 생성
+
+jobs:
+  run-hanteo-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 코드 가져오기
+        uses: actions/checkout@v3
+
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 필요 패키지 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 pandas selenium webdriver-manager
+
+      - name: 오케스트레이터 실행 (한터차트 수집)
+        run: |
+          python main_orchestrator.py
+
+      - name: 수집된 결과물(CSV) 업로드하여 확인하기
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hanteo-Test-Result
+          path: hanteo_test_result.csv
