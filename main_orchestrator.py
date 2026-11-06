@@ -52,11 +52,20 @@ def scrape_digital_charts(jobs):
     all_digital_data = []
 
     for job in jobs:
-        platform = job['service']
+        platform = job.get('service', 'unknown')
         limit = job.get('entity_limit', 100)
-        url = job['source_urls'][0]
         hype_weight = job.get('hype_weight', 0)
         
+        # 🌟 KeyError 방지: 'source_urls'가 없거나 리스트가 아니면 빈 문자열로 처리하여 에러를 막습니다.
+        urls = job.get('source_urls', [])
+        if isinstance(urls, list) and len(urls) > 0:
+            url = urls[0]
+        elif isinstance(urls, str):
+            url = urls
+        else:
+            print(f"\n📡 [{platform}] ⚠️ URL 누락으로 수집을 건너뜁니다.")
+            continue
+            
         print(f"\n📡 [{platform}] 차트 수집 중... (가중치: {hype_weight})")
         
         try:
@@ -65,7 +74,6 @@ def scrape_digital_charts(jobs):
                 res = requests.get(url, headers=headers, timeout=10)
                 soup = BeautifulSoup(res.text, 'html.parser')
                 
-                # 멜론 1~50위, 51~100위 묶음 리스트 추출
                 songs = soup.select('tbody tr.lst50, tbody tr.lst100')[:limit]
                 for idx, song in enumerate(songs, 1):
                     title_el = song.select_one('div.ellipsis.rank01 span a')
@@ -85,10 +93,9 @@ def scrape_digital_charts(jobs):
             elif platform == 'apple':
                 driver = None
                 try:
-                    driver = get_driver()
+                    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=Options().add_argument('--headless'))
                     driver.get(url)
                     time.sleep(5)
-                    # 스크롤 다운
                     for _ in range(5):
                         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                         time.sleep(1.5)
@@ -115,7 +122,7 @@ def scrape_digital_charts(jobs):
             elif platform == 'spotify':
                 driver = None
                 try:
-                    driver = get_driver()
+                    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=Options().add_argument('--headless'))
                     driver.get(url)
                     time.sleep(6)
                     
@@ -126,7 +133,6 @@ def scrape_digital_charts(jobs):
                         if not title_el:
                              title_el = song.select_one('div[data-testid="internal-track-link"]')
                         
-                        # 스포티파이는 여러 아티스트가 묶여있음
                         artist_els = song.select('span[data-testid="internal-track-link"]')
                         if not artist_els:
                             artist_els = song.select('a[data-testid="internal-track-link"]')
