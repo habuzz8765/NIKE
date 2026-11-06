@@ -11,6 +11,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.action_chains import ActionChains
 
 # ---------------------------------------------------------
 # 설정 파일 로드
@@ -29,11 +30,10 @@ def get_driver():
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
     chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-    
     return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
 # ---------------------------------------------------------
-# 1. 한터차트 크롤러 (이번 테스트에서는 건너뜀)
+# 1. 한터차트 (Physical) 크롤러 
 # ---------------------------------------------------------
 def scrape_hanteo_daily(limit=100):
     print("\n[Hanteo] 피지컬 차트 수집은 이번 디지털 테스트에서 생략됩니다.")
@@ -56,7 +56,7 @@ def scrape_digital_charts(jobs):
         limit = job.get('entity_limit', 100)
         hype_weight = job.get('hype_weight', 0)
         
-        # 🌟 KeyError 방지: 'source_urls'가 없거나 리스트가 아니면 빈 문자열로 처리하여 에러를 막습니다.
+        # 🌟 에러의 원인 완벽 방어: source_urls 키가 없으면 부드럽게 패스합니다!
         urls = job.get('source_urls', [])
         if isinstance(urls, list) and len(urls) > 0:
             url = urls[0]
@@ -93,7 +93,7 @@ def scrape_digital_charts(jobs):
             elif platform == 'apple':
                 driver = None
                 try:
-                    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=Options().add_argument('--headless'))
+                    driver = get_driver()
                     driver.get(url)
                     time.sleep(5)
                     for _ in range(5):
@@ -122,7 +122,7 @@ def scrape_digital_charts(jobs):
             elif platform == 'spotify':
                 driver = None
                 try:
-                    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=Options().add_argument('--headless'))
+                    driver = get_driver()
                     driver.get(url)
                     time.sleep(6)
                     
@@ -166,14 +166,13 @@ def main():
     print("NIKE (New Insights for K-pop Explorers) 오케스트레이터 가동\n")
     config = load_config()
     
-    # 🌟 필터링 조건 완화: 'enabled'가 True이고, 서비스 이름이 'hanteo'가 아닌 모든 것을 디지털 차트로 간주합니다.
+    # 🌟 필터링 조건: hanteo가 아닌 모든 작업을 디지털로 긁어옵니다.
     digital_jobs = [job for job in config.get("jobs", []) if job.get("enabled", True) and job.get("service", "") != "hanteo"]
     
     if digital_jobs:
         digital_df = scrape_digital_charts(digital_jobs)
         if not digital_df.empty:
             print(f"\n✅ 디지털 차트 수집 완료: 총 {len(digital_df)} 건")
-            # 파일명을 워크플로우와 정확히 맞춤
             digital_df.to_csv("digital_test_result.csv", index=False, encoding="utf-8-sig")
             print("결과가 digital_test_result.csv 로 안전하게 저장되었습니다.")
         else:
