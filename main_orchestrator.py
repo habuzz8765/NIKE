@@ -1,10 +1,19 @@
 import os
 import json
 import time
+import re
 import requests
 import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from bs4 import BeautifulSoup
+
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # ---------------------------------------------------------
 # 설정 파일 로드
@@ -14,57 +23,92 @@ def load_config():
         return json.load(f)
 
 # ---------------------------------------------------------
-# 한터차트 (Physical) API 다이렉트 크롤러
+# 한터차트 (Physical) 크롤러 (Selenium 렌더링 방식)
 # ---------------------------------------------------------
 def scrape_hanteo_daily(limit=100):
     print("\n" + "="*50)
-    print(f"[Hanteo] 피지컬(음반) 일간 차트 API 수집 시작...")
+    print(f"[Hanteo] 피지컬 일간 차트 수집 시작...")
     print("="*50)
     
+    driver = None
     hanteo_data = []
     scrape_time = datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
     
-    # 🌟 브라우저(Selenium) 크래시를 원천 차단하기 위해 한터차트의 실제 API 주소를 직접 호출합니다.
-    # (주의: date 파라미터를 빈칸으로 보내면 실시간 차트를 뱉어냅니다.)
-    api_url = "https://www.hanteochart.com/api/chart/album/real"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.hanteochart.com/networkalbum/real"
-    }
-    
     try:
-        response = requests.get(api_url, headers=headers, timeout=10)
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        # 이미지 로딩 오프 (메모리 절약)
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        chrome_options.add_experimental_option("prefs", prefs)
+        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
         
-        if response.status_code == 200:
-            data = response.json()
-            # 한터차트 API의 실제 데이터 배열(list) 접근
-            items = data.get('data', [])[:limit]
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        driver.set_window_size(1920, 1080)
+        wait = WebDriverWait(driver, 15)
+        
+        # 🌟 Buzz님이 알려주신 정확한 신규 한터차트 일간 주소 적용!
+        driver.get("https://www.hanteochart.com/ko/charts/album/daily")
+        
+        # 차트 리스트 렌더링 대기
+        time.sleep(5) # React 사이트 렌더링 넉넉히 대기
+        
+        # 100위까지 렌더링하기 위해 스크롤 다운
+        for _ in range(3):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1.5)
+        
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        
+        # 신규 사이트 구조에 맞춘 광범위 CSS 셀렉터
+        items = soup.select('div[class*="list-item"], li[class*="item"], div[class*="row"], div[class*="AlbumChart"]')
+        
+        # CSS로 명확히 못 찾은 경우 텍스트 기반으로 앨범 블록 역추적 (딥러닝 탐색)
+        if not items or len(items) < 10:
+            print("  기본 구조 탐색 실패, 숫자 태그 기반 딥러닝 탐색 중...")
+            rank_tags = soup.find_all(string=re.compile(r'^\d{1,3}$'))
+            valid_items = []
+            for tag in rank_tags:
+                parent = tag.find_parent('div') or tag.find_parent('li')
+                if parent and parent not in valid_items:
+                    valid_items.append(parent)
+            items = valid_items
             
-            for idx, item in enumerate(items, 1):
-                album_name = item.get('albumName', '정보 없음')
-                artist_name = item.get('artistName', '정보 없음')
-                # 한터 음반지수 (salesIndex)
-                sales_index = str(item.get('salesIndex', '0'))
+        items = items[:limit]
+        
+        for idx, item in enumerate(items, 1):
+            text_blocks = [t.strip() for t in item.get_text(separator='|').split('|') if t.strip()]
+            clean_texts = [t for t in text_blocks if not t.isdigit() and t not in ['-', 'NEW', 'UP', 'DOWN'] and not t.startswith('0')]
+            
+            album_name = clean_texts[0] if len(clean_texts) > 0 else "정보 없음"
+            artist_name = clean_texts[1] if len(clean_texts) > 1 else "정보 없음"
+            
+            # 판매량(지수) 찾기: 쉼표가 들어간 숫자 추출
+            sales = "0"
+            numbers = [t for t in text_blocks if ',' in t and any(c.isdigit() for c in t)]
+            if numbers:
+                sales = numbers[0] 
                 
-                if not album_name or album_name == "정보 없음":
-                    continue
-                    
-                hanteo_data.append({
-                    'tab_type': 'physical',
-                    'platform': 'hanteo',
-                    'rank': idx,
-                    'album': album_name,
-                    'artist': artist_name,
-                    'sales_index': sales_index,
-                    'scrape_time': scrape_time
-                })
-                print(f"  [{idx}/{limit}] {album_name[:15]}... - {artist_name} (지수: {sales_index})")
-        else:
-            print(f"[Hanteo] API 접근 거부 (Status Code: {response.status_code})")
+            if album_name == "정보 없음":
+                continue
+                
+            hanteo_data.append({
+                'tab_type': 'physical',
+                'platform': 'hanteo',
+                'rank': idx,
+                'album': album_name,
+                'artist': artist_name,
+                'sales_index': sales,
+                'scrape_time': scrape_time
+            })
+            print(f"  [{idx}/{limit}] {album_name[:15]}... - {artist_name} (지수: {sales})")
             
     except Exception as e:
-        print(f"[Hanteo] API 요청 에러 발생: {e}")
+        print(f"[Hanteo] 에러 발생: {e}")
+    finally:
+        if driver: driver.quit()
         
     return pd.DataFrame(hanteo_data)
 
