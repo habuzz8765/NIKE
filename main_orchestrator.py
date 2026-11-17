@@ -12,6 +12,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
 
 # ---------------------------------------------------------
 # 설정 파일 로드
@@ -33,7 +35,7 @@ def get_driver():
     return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
 # ---------------------------------------------------------
-# 1. 한터차트 (Physical) 크롤러 (Buzz님 검증 코드 완벽 이식)
+# 1. 한터차트 (Physical) 크롤러 
 # ---------------------------------------------------------
 def scrape_hanteo_daily(limit=100):
     print("\n" + "="*50)
@@ -105,12 +107,9 @@ def scrape_hanteo_daily(limit=100):
                 }
             }
         }
-        
         if (valid.length === 0) return null;
-        
         valid.sort((a, b) => a.y - b.y);
         var target = valid[0].el;
-        
         var getInnermost = function(node) {
             for (var j = 0; j < node.children.length; j++) {
                 var child = node.children[j];
@@ -129,7 +128,6 @@ def scrape_hanteo_daily(limit=100):
             time.sleep(1)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.8);")
             time.sleep(2)
-            
             target_el = driver.execute_script(js_find_visible_more)
             if target_el:
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_el)
@@ -148,7 +146,6 @@ def scrape_hanteo_daily(limit=100):
         var result = [];
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
-            
             var isVisible = true;
             var curr = row;
             while(curr && curr !== document.body) {
@@ -159,7 +156,6 @@ def scrape_hanteo_daily(limit=100):
                 }
                 curr = curr.parentElement;
             }
-            
             if (!isVisible) continue;
             
             var leftEl = row.querySelector('div.left');
@@ -185,27 +181,18 @@ def scrape_hanteo_daily(limit=100):
         }
         return result;
         """
-        
         extracted_rows = driver.execute_script(js_extract_data)
-        
         if extracted_rows:
             for r in extracted_rows:
                 hanteo_data.append({
-                    'tab_type': 'physical',
-                    'platform': 'hanteo',
-                    'rank': r[0],
-                    'album': r[1],
-                    'artist': r[2],
-                    'sales': r[3],
-                    'sales_index': r[4], 
+                    'tab_type': 'physical', 'platform': 'hanteo', 'rank': r[0],
+                    'album': r[1], 'artist': r[2], 'sales': r[3], 'sales_index': r[4], 
                     'scrape_time': scrape_time
                 })
-            
     except Exception as e:
         print(f"[Hanteo] 에러 발생: {e}")
     finally:
         if driver: driver.quit()
-        
     return pd.DataFrame(hanteo_data)
 
 # ---------------------------------------------------------
@@ -229,41 +216,34 @@ def scrape_digital_charts(jobs):
         for key in ['source_urls', 'source_url', 'url', 'target_url', 'link']:
             if key in job:
                 val = job[key]
-                if isinstance(val, list) and len(val) > 0:
-                    url = val[0]
-                elif isinstance(val, str):
-                    url = val
+                if isinstance(val, list) and len(val) > 0: url = val[0]
+                elif isinstance(val, str): url = val
                 break
                 
         if not url:
-            print(f"\n📡 [{platform}] ⚠️ URL(주소) 항목을 json에서 찾을 수 없어 건너뜁니다.")
+            print(f"\n📡 [{platform}] ⚠️ URL(주소) 항목 누락으로 건너뜁니다.")
             continue
             
         print(f"\n📡 [{platform}] 차트 수집 중... (가중치: {hype_weight})")
         print(f"🔗 접속 주소: {url}")
         
         try:
-            # --- 2.1 멜론 일간 차트 (API 정공법 - Requests) ---
+            # --- 2.1 멜론 일간 차트 ---
             if platform == 'melon':
                 res = requests.get(url, headers=headers, timeout=10)
                 soup = BeautifulSoup(res.text, 'html.parser')
-                
                 songs = soup.select('tbody tr.lst50, tbody tr.lst100')[:limit]
                 for idx, song in enumerate(songs, 1):
                     title_el = song.select_one('div.ellipsis.rank01 span a')
                     artist_el = song.select_one('div.ellipsis.rank02 span a')
-                    
-                    title = title_el.text.strip() if title_el else "정보 없음"
-                    artist = artist_el.text.strip() if artist_el else "정보 없음"
-                    
                     all_digital_data.append({
                         'tab_type': 'digital', 'platform': platform, 'rank': idx,
-                        'title': title, 'artist': artist, 'hype_weight': hype_weight,
-                        'scrape_time': scrape_time
+                        'title': title_el.text.strip() if title_el else "정보 없음",
+                        'artist': artist_el.text.strip() if artist_el else "정보 없음",
+                        'hype_weight': hype_weight, 'scrape_time': scrape_time
                     })
-                    if idx <= 3: print(f"  [{idx}위] {title} - {artist}")
-            
-            # --- 2.2 애플뮤직 차트 (Selenium 렌더링) ---
+
+            # --- 2.2 애플뮤직 차트 ---
             elif platform == 'apple':
                 driver = None
                 try:
@@ -273,26 +253,21 @@ def scrape_digital_charts(jobs):
                     for _ in range(5):
                         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                         time.sleep(1.5)
-                    
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
                     songs = soup.select('.songs-list-row')[:limit]
                     for idx, song in enumerate(songs, 1):
                         title_el = song.select_one('.songs-list-row__song-name')
                         artist_el = song.select_one('.songs-list-row__by-line')
-                        
-                        title = title_el.text.strip() if title_el else "정보 없음"
-                        artist = artist_el.text.strip() if artist_el else "정보 없음"
-                        
                         all_digital_data.append({
                             'tab_type': 'digital', 'platform': platform, 'rank': idx,
-                            'title': title, 'artist': artist, 'hype_weight': hype_weight,
-                            'scrape_time': scrape_time
+                            'title': title_el.text.strip() if title_el else "정보 없음",
+                            'artist': artist_el.text.strip() if artist_el else "정보 없음",
+                            'hype_weight': hype_weight, 'scrape_time': scrape_time
                         })
-                        if idx <= 3: print(f"  [{idx}위] {title} - {artist}")
                 finally:
                     if driver: driver.quit()
 
-            # --- 2.3 스포티파이 Top 50 (Selenium 렌더링 - 🌟버그 완벽 수정) ---
+            # --- 2.3 스포티파이 Top 50 (🌟가상 스크롤 완벽 대응) ---
             elif platform == 'spotify':
                 driver = None
                 try:
@@ -300,38 +275,47 @@ def scrape_digital_charts(jobs):
                     driver.get(url)
                     time.sleep(6)
                     
-                    # 스크롤을 살짝 내려서 곡들이 전부 렌더링되도록 유도
-                    for _ in range(5):
-                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    collected_spotify_songs = {}
+                    body = driver.find_element(By.TAG_NAME, 'body')
+                    
+                    # Page Down 키를 10번 누르며 화면에 나타나는 곡들을 딕셔너리에 누적 저장합니다.
+                    for _ in range(12):
+                        soup = BeautifulSoup(driver.page_source, 'html.parser')
+                        songs = soup.select('div[data-testid="tracklist-row"]')
+                        
+                        for song in songs:
+                            # aria-rowindex 속성으로 절대 순위 파악 (스포티파이는 헤더가 1이므로 순위는 -1)
+                            aria_row = song.get('aria-rowindex')
+                            if not aria_row or not aria_row.isdigit(): continue
+                            rank_val = int(aria_row) - 1
+                            
+                            if rank_val <= 0 or rank_val > limit or rank_val in collected_spotify_songs:
+                                continue
+                                
+                            title_el = song.select_one('a[data-testid="internal-track-link"]')
+                            artist_els = song.select('a[href*="/artist/"]')
+                            
+                            title = title_el.text.strip() if title_el else "정보 없음"
+                            artist = ", ".join([a.text.strip() for a in artist_els]) if artist_els else "정보 없음"
+                            
+                            collected_spotify_songs[rank_val] = {
+                                'tab_type': 'digital', 'platform': platform, 'rank': rank_val,
+                                'title': title, 'artist': artist, 'hype_weight': hype_weight,
+                                'scrape_time': scrape_time
+                            }
+                        
+                        # 화면을 한 칸 내리고 1초 대기 (가상 스크롤 로딩 유도)
+                        body.send_keys(Keys.PAGE_DOWN)
                         time.sleep(1)
                         
-                    soup = BeautifulSoup(driver.page_source, 'html.parser')
-                    songs = soup.select('div[data-testid="tracklist-row"]')[:limit]
-                    for idx, song in enumerate(songs, 1):
-                        # 1. 제목: 무조건 internal-track-link 태그로 고정
-                        title_el = song.select_one('a[data-testid="internal-track-link"]')
-                        title = title_el.text.strip() if title_el else "정보 없음"
+                    # 누적된 곡들을 순위대로 정렬하여 메인 리스트에 병합
+                    for rank_val in sorted(collected_spotify_songs.keys()):
+                        all_digital_data.append(collected_spotify_songs[rank_val])
                         
-                        # 2. 아티스트: 무조건 링크 주소에 '/artist/'가 포함된 태그만 싹쓸이
-                        artist_els = song.select('a[href*="/artist/"]')
-                        if artist_els:
-                            # 듀엣 곡 등 가수가 여러 명일 경우 콤마(,)로 예쁘게 이어붙입니다.
-                            artist = ", ".join([a.text.strip() for a in artist_els])
-                        else:
-                            artist = "정보 없음"
-                        
-                        all_digital_data.append({
-                            'tab_type': 'digital', 'platform': platform, 'rank': idx,
-                            'title': title, 'artist': artist, 'hype_weight': hype_weight,
-                            'scrape_time': scrape_time
-                        })
-                        if idx <= 3: print(f"  [{idx}위] {title} - {artist}")
                 finally:
                     if driver: driver.quit()
 
-            # --- 2.4 유튜브 뮤직 차트 (우회 파싱 보류) ---
             elif platform == 'ytmusic':
-                print("  [YTMusic] 유튜브 차트는 Selenium 접근 시 차단 확률이 높아 이번 테스트에서는 기본 구조만 확인합니다.")
                 pass
                 
         except Exception as e:
@@ -346,13 +330,10 @@ def main():
     print("NIKE (New Insights for K-pop Explorers) 오케스트레이터 가동\n")
     config = load_config()
     
-    physical_df = pd.DataFrame()
-    digital_df = pd.DataFrame()
-    
     digital_jobs = [job for job in config.get("jobs", []) if job.get("enabled", True) and job.get("service", "") != "hanteo"]
     hanteo_job = next((job for job in config.get("jobs", []) if job.get("enabled", True) and job.get("service", "") == "hanteo"), None)
 
-    # 1. 피지컬 (한터차트) 실행 - 디지털 테스트에만 집중하시려면 이 3줄을 지우거나 주석 처리하시면 훨씬 빨리 끝납니다!
+    # 1. 피지컬 (한터차트) 실행 - (디지털만 테스트하려면 hanteo_job 주석 처리 요망)
     if hanteo_job:
         physical_df = scrape_hanteo_daily(limit=hanteo_job.get("entity_limit", 100))
         if not physical_df.empty:
@@ -369,7 +350,7 @@ def main():
         else:
             print("\n❌ 디지털 데이터가 수집되지 않았습니다.")
     else:
-        print("\n⚠️ 실행할 디지털 차트 작업이 sync_config.json 에 없습니다.")
+        print("\n⚠️ 실행할 디지털 차트 작업이 없거나 설정 오류입니다.")
 
 if __name__ == "__main__":
     main()
