@@ -128,6 +128,7 @@ def scrape_hanteo_daily(limit=100):
             time.sleep(1)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.8);")
             time.sleep(2)
+            
             target_el = driver.execute_script(js_find_visible_more)
             if target_el:
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_el)
@@ -267,7 +268,7 @@ def scrape_digital_charts(jobs):
                 finally:
                     if driver: driver.quit()
 
-            # --- 2.3 스포티파이 Top 50 (🌟가상 스크롤 완벽 대응) ---
+            # --- 2.3 스포티파이 Top 50 (🌟순차적 중복 제거 완벽 대응) ---
             elif platform == 'spotify':
                 driver = None
                 try:
@@ -275,42 +276,42 @@ def scrape_digital_charts(jobs):
                     driver.get(url)
                     time.sleep(6)
                     
-                    collected_spotify_songs = {}
+                    collected_spotify_songs = []
+                    seen_signatures = set()
                     body = driver.find_element(By.TAG_NAME, 'body')
                     
-                    # Page Down 키를 10번 누르며 화면에 나타나는 곡들을 딕셔너리에 누적 저장합니다.
+                    # Page Down 키를 12번 누르며 50곡을 쓸어담습니다.
                     for _ in range(12):
                         soup = BeautifulSoup(driver.page_source, 'html.parser')
                         songs = soup.select('div[data-testid="tracklist-row"]')
                         
                         for song in songs:
-                            # aria-rowindex 속성으로 절대 순위 파악 (스포티파이는 헤더가 1이므로 순위는 -1)
-                            aria_row = song.get('aria-rowindex')
-                            if not aria_row or not aria_row.isdigit(): continue
-                            rank_val = int(aria_row) - 1
-                            
-                            if rank_val <= 0 or rank_val > limit or rank_val in collected_spotify_songs:
-                                continue
-                                
                             title_el = song.select_one('a[data-testid="internal-track-link"]')
                             artist_els = song.select('a[href*="/artist/"]')
                             
                             title = title_el.text.strip() if title_el else "정보 없음"
                             artist = ", ".join([a.text.strip() for a in artist_els]) if artist_els else "정보 없음"
                             
-                            collected_spotify_songs[rank_val] = {
-                                'tab_type': 'digital', 'platform': platform, 'rank': rank_val,
-                                'title': title, 'artist': artist, 'hype_weight': hype_weight,
-                                'scrape_time': scrape_time
-                            }
-                        
-                        # 화면을 한 칸 내리고 1초 대기 (가상 스크롤 로딩 유도)
+                            # 중복 방지를 위한 지문(Signature) 생성
+                            sig = f"{title}::{artist}"
+                            
+                            # 새로운 곡이면 리스트에 순서대로 추가
+                            if sig not in seen_signatures and title != "정보 없음":
+                                seen_signatures.add(sig)
+                                collected_spotify_songs.append({
+                                    'tab_type': 'digital', 'platform': platform,
+                                    'title': title, 'artist': artist, 'hype_weight': hype_weight,
+                                    'scrape_time': scrape_time
+                                })
+                                
                         body.send_keys(Keys.PAGE_DOWN)
                         time.sleep(1)
                         
-                    # 누적된 곡들을 순위대로 정렬하여 메인 리스트에 병합
-                    for rank_val in sorted(collected_spotify_songs.keys()):
-                        all_digital_data.append(collected_spotify_songs[rank_val])
+                    # 수집된 순서대로 1위부터 순위를 강제로 부여하여 병합
+                    for idx, song_data in enumerate(collected_spotify_songs[:limit], 1):
+                        song_data['rank'] = idx
+                        all_digital_data.append(song_data)
+                        if idx <= 3: print(f"  [{idx}위] {song_data['title']} - {song_data['artist']}")
                         
                 finally:
                     if driver: driver.quit()
