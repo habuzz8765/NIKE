@@ -12,8 +12,6 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
 
 # ---------------------------------------------------------
 # 설정 파일 로드
@@ -268,7 +266,7 @@ def scrape_digital_charts(jobs):
                 finally:
                     if driver: driver.quit()
 
-            # --- 2.3 스포티파이 Top 50 (🌟순차적 중복 제거 완벽 대응) ---
+            # --- 2.3 스포티파이 Top 50 (🌟 요소 강제 스크롤 방식) ---
             elif platform == 'spotify':
                 driver = None
                 try:
@@ -278,10 +276,9 @@ def scrape_digital_charts(jobs):
                     
                     collected_spotify_songs = []
                     seen_signatures = set()
-                    body = driver.find_element(By.TAG_NAME, 'body')
                     
-                    # Page Down 키를 12번 누르며 50곡을 쓸어담습니다.
-                    for _ in range(12):
+                    # 10번에 걸쳐 조금씩 내리며 수집
+                    for _ in range(10):
                         soup = BeautifulSoup(driver.page_source, 'html.parser')
                         songs = soup.select('div[data-testid="tracklist-row"]')
                         
@@ -292,10 +289,7 @@ def scrape_digital_charts(jobs):
                             title = title_el.text.strip() if title_el else "정보 없음"
                             artist = ", ".join([a.text.strip() for a in artist_els]) if artist_els else "정보 없음"
                             
-                            # 중복 방지를 위한 지문(Signature) 생성
                             sig = f"{title}::{artist}"
-                            
-                            # 새로운 곡이면 리스트에 순서대로 추가
                             if sig not in seen_signatures and title != "정보 없음":
                                 seen_signatures.add(sig)
                                 collected_spotify_songs.append({
@@ -303,11 +297,17 @@ def scrape_digital_charts(jobs):
                                     'title': title, 'artist': artist, 'hype_weight': hype_weight,
                                     'scrape_time': scrape_time
                                 })
-                                
-                        body.send_keys(Keys.PAGE_DOWN)
-                        time.sleep(1)
                         
-                    # 수집된 순서대로 1위부터 순위를 강제로 부여하여 병합
+                        # 🌟 스포티파이 내부 스크롤바 강제 굴리기: 화면상 가장 마지막 곡을 찾아 거기로 점프합니다.
+                        driver.execute_script("""
+                            var tracks = document.querySelectorAll('div[data-testid="tracklist-row"]');
+                            if(tracks.length > 0) {
+                                tracks[tracks.length - 1].scrollIntoView({block: 'center'});
+                            }
+                        """)
+                        time.sleep(1.5)
+                        
+                    # 수집된 순서대로 1위부터 강제 부여
                     for idx, song_data in enumerate(collected_spotify_songs[:limit], 1):
                         song_data['rank'] = idx
                         all_digital_data.append(song_data)
@@ -334,7 +334,7 @@ def main():
     digital_jobs = [job for job in config.get("jobs", []) if job.get("enabled", True) and job.get("service", "") != "hanteo"]
     hanteo_job = next((job for job in config.get("jobs", []) if job.get("enabled", True) and job.get("service", "") == "hanteo"), None)
 
-    # 1. 피지컬 (한터차트) 실행 - (디지털만 테스트하려면 hanteo_job 주석 처리 요망)
+    # 1. 피지컬 (한터차트) 실행 - 테스트 시 주석 처리 무방
     if hanteo_job:
         physical_df = scrape_hanteo_daily(limit=hanteo_job.get("entity_limit", 100))
         if not physical_df.empty:
